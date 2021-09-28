@@ -3,9 +3,7 @@
 # checked version: Yes
 
 source("./cohortDefinition.R")
-# library(DT) # make a nice table
-# library(tidyr)
-# library(knitr)
+
 
 
 extractFeatures = function(name="#breakthroughCovid",value=breakthroughCovid,con,extractVaccineBrand=T,extractOutcomes=T){
@@ -45,6 +43,7 @@ breakthroughCovidFeatures = extractFeatures(name="#breakthroughCovid",value=brea
 # nonBreakthroughCovidFeatures = extractFeatures(name="#nonBreakthroughCovid",value=nonBreakthroughCovid,con=con,extractVaccineBrand = T)
 nonBreakthroughPcrCovidFeatures = extractFeatures(name="#nonBreakthroughPcrCovid",value=nonBreakthroughPcrCovid,con=con,extractVaccineBrand = T,extractOutcomes=T)
 preVaccinePcrPositiveCovidFeatures = extractFeatures(name="#preVaccinePcrPositiveCovid",value=preVaccinePcrPositiveCovid,con=con,extractVaccineBrand = F,extractOutcomes=T)
-preVaccinePcrNegativeCovidFeatures = extractFeatures(name="#preVaccinePcrNegativeCovid",value=preVaccinePcrNegativeCovid,con=con,extractVaccineBrand = F,extractOutcomes=F)
+preVaccinePcrNegativeCovidFeatures = extractFeatures(name="#preVaccinePcrNegativeCovid",value=preVaccinePcrNegativeCovid,con=con,extractVaccineBrand = F,extractOutcomes=T)
 postVaccinePcrPositiveCovidFeatures = extractFeatures(name="#postVaccinePcrPositiveCovid",value=postVaccinePcrPositiveCovid,con=con,extractVaccineBrand = F,extractOutcomes=T)
-postVaccinePcrNegativeCovidFeatures = extractFeatures(name="#postVaccinePcrNegativeCovid",value=postVaccinePcrNegativeCovid,con=con,extractVaccineBrand = F,extractOutcomes=F)
+postVaccinePcrNegativeCovidFeatures = extractFeatures(name="#postVaccinePcrNegativeCovid",value=postVaccinePcrNegativeCovid,con=con,extractVaccineBrand = F,extractOutcomes=T)
+

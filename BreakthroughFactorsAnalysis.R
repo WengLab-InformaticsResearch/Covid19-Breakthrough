@@ -1,19 +1,12 @@
-# Last updated: 09-08-2021
+# Last updated: 09-20-2021
 # Author: Cong Liu
 # checked version: Yes
 
-source("./featureExtraction.R")
-library(MatchIt)
-library(epitools)
-library(chron)
-library(biostat3)
-library(tibble)
-library(epiR)
-library(parallel)
+# source("./cohortCharacterizationAndRefine.R")
 
 
 # get matched samples based on nearest neighbors.
-breakthroughCovidCov = breakthroughCovid %>% 
+breakthroughCovidCov = breakthroughCovidRefined %>% 
   left_join(breakthroughCovidFeatures$visit,by = "person_id",copy = TRUE) %>%
   left_join(breakthroughCovidFeatures$obDays,by = "person_id",copy = TRUE) %>%
   dplyr::select(person_id,latest_dose_date,earliest_dose_date,observation_days,count_of_visits,index_date) %>%
@@ -21,23 +14,29 @@ breakthroughCovidCov = breakthroughCovid %>%
   replace_na(list(observation_days = 0, count_of_visits = 0))
 
 
-nonBreakthroughPcrCovidCov = nonBreakthroughPcrCovid %>% 
+nonBreakthroughPcrCovidCov = nonBreakthroughPcrCovidRefined %>% 
   left_join(nonBreakthroughPcrCovidFeatures$visit,by = "person_id",copy = TRUE) %>%
   left_join(nonBreakthroughPcrCovidFeatures$obDays,by = "person_id",copy = TRUE) %>%
   dplyr::select(person_id,latest_dose_date,earliest_dose_date,observation_days,count_of_visits,index_date) %>%
   replace_na(list(observation_days = 0, count_of_visits = 0)) %>%
   mutate(sample = "nonBreakthroughPcrCovid")
 
+
+immuno = rbind(breakthroughCovidFeatures$immuno,nonBreakthroughPcrCovidFeatures$immuno)
+
 forMatchData = rbind(breakthroughCovidCov,nonBreakthroughPcrCovidCov) %>%
   mutate(group = as.logical(sample == 'breakthroughCovid')) %>%
   mutate(ldd_category= cut(x = latest_dose_date, "months")) %>%
   mutate(status = as.numeric(group)) %>%
   mutate(time = if_else(condition = (status == 1), 
-                        true = (as.integer(difftime(units = "days",index_date,latest_dose_date) - 14)), 
-                        false = (as.integer(difftime(units = "days","2021-06-30",latest_dose_date) - 14))
+                        true = (as.integer(difftime(units = "days",index_date,latest_dose_date) - 14)) + 1, 
+                        false = (as.integer(difftime(units = "days",index_date,latest_dose_date) - 14)) + 1
                         )
           )
 
+# overall incidence rate
+overallIR = 1000*epi.conf(matrix(apply(forMatchData %>% dplyr::select(status,time),2,sum),nrow = 1),ctype = 'inc.rate',method = 'exact',N = 1000)
+overallIR
 # set.seed(5)
 # # take a minute
 # matchIt = matchit(group ~ ldd_category + observation_days + count_of_visits, data = forMatchData, method="nearest", ratio=10)
@@ -68,6 +67,7 @@ forMatchData = rbind(breakthroughCovidCov,nonBreakthroughPcrCovidCov) %>%
 #   mutate(ldd_category= cut(x = latest_dose_date, "months"))
 # oddsRatioTest(table(lddForChisqTest$group, lddForChisqTest$ldd_category))
 
+res=NULL
 
 # brand
 brand = rbind(breakthroughCovidFeatures$brand,nonBreakthroughPcrCovidFeatures$brand)
@@ -81,25 +81,62 @@ brandForTest = forMatchData %>%
 
 brandResults = univarTest(brandForTest,"vaccine_brand",
                           adj=c("ldd_category","count_of_visits","observation_days"))
+for(r in c("moderna","pfizer")){
+  res = rbind(res,cbind(r,1000*epi.conf(matrix(apply(brandForTest %>% filter(vaccine_brand == r) 
+                                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                                  ctype = 'inc.rate',method = 'exact',N = 1000)))
+}
 
 # demo
 demo = rbind(breakthroughCovidFeatures$demo,nonBreakthroughPcrCovidFeatures$demo)
 # matchItData vs. forMatchData
 demoForTest = forMatchData %>% left_join(demo,by = "person_id") %>%
   mutate(age_at_event = as.integer(difftime(units = "days",latest_dose_date,DOB)/365.24)) %>%
-  mutate(age_category_at_event = cut_number(x = age_at_event,n = 2)) %>%
+  mutate(age_category_at_event = cut(age_at_event, breaks=c(0, 65,Inf), include.lowest=TRUE) ) %>%
   mutate(race_category = case_when((race == "White") ~ "White",
                           (race == "Black or African American") ~ "Black",
                           (race == "Asian") ~ "Asian",
                           TRUE ~ "Other/Unknown")) %>% 
   mutate(ethnicity_category = case_when((ethnicity=='Hispanic or Latino')~"Hispanic",
                                         ethnicity=='Not Hispanic or Latino'~"Not Hispanic",
-                                        TRUE~"Other/Unknown"))
+                                        TRUE~"Other/Unknown")) %>% distinct()
 
 covariates = c("age_category_at_event", "race_category",  "ethnicity_category", "gender")
 demoResults = do.call("rbind", sapply(covariates,
-                                      function(x) univarTest(demoForTest,x,
-                                                             adj=c("ldd_category","count_of_visits","observation_days"))))
+                                      function(x) univarTest(demoForTest,x,adj=c("ldd_category","count_of_visits","observation_days"))))
+
+
+for(r in c("[0,65]","(65,Inf]")){
+  res = rbind(res,cbind(r,
+    1000*epi.conf(matrix(apply(demoForTest %>% filter(age_category_at_event == r) 
+                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                  ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+for(r in c("Asian","Black","White","Other/Unknown")){
+  res = rbind(res,cbind(r,
+  1000*epi.conf(matrix(apply(demoForTest %>% filter(race_category == r) 
+                             %>% dplyr::select(status,time),2,sum),nrow = 1),
+                ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+for(r in c("Hispanic","Not Hispanic","Other/Unknown")){
+  res = rbind(res,cbind(r,
+    1000*epi.conf(matrix(apply(demoForTest %>% filter(ethnicity_category == r) 
+                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                  ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+
+for(r in c("FEMALE","MALE")){
+  res = rbind(res,cbind(r,
+    1000*epi.conf(matrix(apply(demoForTest %>% filter(gender == r) 
+                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                  ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+
+
 
 # oddsRatioTest(table(demoForChisqTest$group, demoForChisqTest$gender))
 # oddsRatioTest(table(demoForChisqTest$group, demoForChisqTest$race_category))
@@ -121,21 +158,61 @@ immunoForTest = forMatchData %>% left_join(immuno,by = "person_id") %>%
   dcast(person_id+group+time+status+ldd_category+count_of_visits+observation_days+isImmuo~category,fun = length)
 covariates = c("isImmuo", "tumor","ckd","hiv","immuno_suppress_drug","immuno_deficiency","transplant")
 
+for(r in c("Not Immuno Comprised","Immuno Comprised")){
+  res = rbind(res,cbind(r,
+    1000*epi.conf(matrix(apply(immunoForTest %>% filter(isImmuo == r) 
+                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                  ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+
+for(r in covariates){
+  res = rbind(res,cbind(r,
+    1000*epi.conf(matrix(apply(immunoForTest %>% filter(!!as.symbol(r) == 1) 
+                               %>% dplyr::select(status,time),2,sum),nrow = 1),
+                  ctype = 'inc.rate',method = 'exact',N = 1000)
+  ))
+}
+
+
 immunoResults = lapply(covariates,
                        function(x) univarTest(immunoForTest,x,
                                               adj=c("ldd_category","count_of_visits","observation_days"))
 )
 
-# adj for age.
+table2Col1 = res
+demoRows = c(2,13,14,15,26,27,38,39)
+brandRows = c(2)
+table2Col2 = rbind(demoResults[demoRows,],(brandResults %>% as.data.frame())[brandRows,])
+for(i in c(1:length(immunoResults))){
+  table2Col2 = rbind(table2Col2,(immunoResults[[i]] %>% as.data.frame())[2,])
+}
+table2Col2
+
+
+# adj for covariates
 immunoResultsAdj = lapply(covariates,
                         function(x) univarTest(immunoForTest %>% left_join(demoForTest),x,
                                                adj=c("age_at_event","ldd_category","count_of_visits","observation_days")
                                                ))
 
 
-brandResultsAdj = as.data.frame(univarTest(brandForTest %>% left_join(demoForTest),"vaccine_brand",
-                          adj=c("age_at_event","ldd_category","count_of_visits","observation_days")))
-
+brandResultsAdj = as.data.frame(univarTest(brandForTest %>% left_join(immunoForTest %>% dplyr::select(person_id,isImmuo) %>% distinct())
+                                           %>% left_join(demoForTest),"vaccine_brand",
+                          adj=c("age_at_event","ldd_category","count_of_visits","observation_days","isImmuo")))
+brandForTest %>% ggplot(aes(y=time,x=as.factor(status))) + geom_boxplot(aes(colour = vaccine_brand))
+immunobrand = brandForTest %>% left_join(immunoForTest %>% dplyr::select(person_id,isImmuo) %>% distinct())
+brandRows = c(2)
+table2Col3 = rbind((brandResultsAdj %>% as.data.frame())[brandRows,])
+for(i in c(1:length(immunoResultsAdj))){
+  table2Col3 = rbind(table2Col3,(immunoResultsAdj[[i]] %>% as.data.frame())[2,])
+}
+table2Col3
+immunobrand %>% mutate(g = case_when(status == 1~"Vax Positive", T~"Vax Negative")) %>% 
+  mutate(x = case_when(isImmuo=='Immuno Comprised'~'Immunocompromised',T~'Not Immunocompromised')) %>%
+  group_by(vaccine_brand,g,x) %>% summarise(N = n()) %>% 
+  ggplot(aes(x, N, fill = vaccine_brand)) + 
+  geom_bar(stat="identity", position = "dodge") + facet_wrap(~as.factor(g),nrow = 2,scales = "free_y")
 # do.call("rbind", list(
 # brandResults,
 # brandResultsAdj,
@@ -159,45 +236,24 @@ condition = rbind(breakthroughCovidFeatures$condition,nonBreakthroughPcrCovidFea
 colnames(condition)[2] = "concept_id"
 drug = rbind(breakthroughCovidFeatures$drug,nonBreakthroughPcrCovidFeatures$drug)
 colnames(drug)[2] = "concept_id"
-concept = rbind(condition,drug)
-matchItDataConcept = forMatchData %>% left_join(concept,by = "person_id") %>% left_join(demoForTest) %>%
-  dplyr::select(person_id,group,concept_id,time,status,count_of_visits,observation_days,ldd_category,age_at_event) %>%
-  distinct_all() %>%
-  as.data.table() 
-matchItDataConceptSum = matchItDataConcept[,.(conceptNBtCount = .N - sum(group), conceptBtCount = sum(group)),by = concept_id]
-matchItDataConceptFiltered = matchItDataConceptSum[(conceptNBtCount + conceptBtCount) > 10] %>% left_join(matchItDataConcept) %>%
-  dplyr::select(person_id, time, status, count_of_visits,observation_days,ldd_category, age_at_event, concept_id)
-matchItDataConceptWide = dcast(matchItDataConceptFiltered, person_id + time + status + count_of_visits + observation_days + ldd_category + age_at_event ~ concept_id,fun = length)
-covariates = colnames(matchItDataConceptWide)[9:dim(matchItDataConceptWide)[2]]
-length(covariates) # 5422
+# concept = rbind(condition,drug)
+conditionConceptRes = univariateTestForAllconcept(forMatchData,demoForTest = demoForTest,concept = condition)
+drugConceptRes = univariateTestForAllconcept(forMatchData,demoForTest = demoForTest,concept = drug)
+table3 = resultsDisplay(conceptRes = conditionConceptRes,con=con)
+table3 %>% fwrite(file = './breakthroughAnalysisRiskFactorsAllCondition90daysPriorFullList.csv')
+table4 = resultsDisplay(conceptRes = drugConceptRes,con=con)
+table4 %>% fwrite(file = './breakthroughAnalysisRiskFactorsAllDrug90daysPriorFullList.csv')
 # test.
 # conceptRes = t(sapply(covariates[1:10],function(x) univarTest(matchItDataConceptWide,x)))
-conceptRes = t(sapply(covariates,function(x) univarConceptScreen(matchItDataConceptWide,x)))
-colnames(conceptRes) = c("irrCI", "irrP")
-conceptRes = conceptRes %>% as.data.frame() %>% rownames_to_column(var = "concept_id")
+
 # matchItDataConcept = matchItDataConcept[,.(conceptNBtCount = .N - sum(group), conceptBtCount = sum(group)),by = concept_id]
 # matchItDataConcept[,AllNBtCount := totalBtCount['FALSE']]
 # matchItDataConcept[,AllBtCount := totalBtCount['TRUE']]
 # # matchItDataCondition = matchItDataConcept[(conceptNBtCount + conceptBtCount) > 10]
 # matchItDataOrResults = matchItDataConcept[,dataTableGroupOddsRatioTest(conceptNBtCount,conceptBtCount,AllNBtCount,AllBtCount),by = concept_id]
-matchItDataOrTopResults = conceptRes %>% 
-  mutate(irrFdr = p.adjust(as.numeric(irrP),method = "bonferroni")) %>% 
-  filter(irrFdr < 0.05)
-matchItDataOrTopResults = matchItDataOrTopResults %>% mutate(concept_id = as.integer(concept_id))
-writeToSqlTempdb(con = con,"#matchItDataOrTopResults",matchItDataOrTopResults)
-conceptName = extractConceptName(con,"#matchItDataOrTopResults")
-matchItDataOrTopResultsName = matchItDataOrTopResults %>% left_join(conceptName) %>%
-  arrange(irrFdr)
-matchItDataOrTopResultsName %>% fwrite("./breakthroughAnalysisRiskFactorsAllConcepts90daysPrior.csv",sep = ",")
-matchItDataOrTopResults = conceptRes %>% 
-  mutate(irrFdr = p.adjust(as.numeric(irrP),method = "bonferroni")) %>% 
-  filter(irrFdr <= 1)
-matchItDataOrTopResults = matchItDataOrTopResults %>% mutate(concept_id = as.integer(concept_id))
-writeToSqlTempdb(con = con,"#matchItDataOrTopResults",matchItDataOrTopResults)
-conceptName = extractConceptName(con,"#matchItDataOrTopResults")
-matchItDataOrTopResultsName = matchItDataOrTopResults %>% left_join(conceptName) %>%
-  arrange(irrFdr)
-matchItDataOrTopResultsName %>% fwrite("./breakthroughAnalysisRiskFactorsAllConcepts90daysPriorFullList.csv",sep = ",")
+
+
+
 # all test stratified by age, gender and brand
 # stratifyImmunoForChisqTest = immunoForChisqTest %>% left_join(demoForChisqTest) %>% 
 #   left_join(brand) %>%left_join(immuno)

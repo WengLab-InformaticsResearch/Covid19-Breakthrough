@@ -3,6 +3,19 @@
 # checked version: No
 
 # db
+library(data.table)
+library(dplyr)
+library(MatchIt)
+library(epitools)
+library(chron)
+library(biostat3)
+library(tibble)
+library(epiR)
+library(parallel)
+library(survival)
+library(ggplot2)
+library(ggfortify)
+library(gridExtra)
 library(RODBC)
 ohdsiConnection = function(server = 'server', database = 'ohdsi', uid = 'uid', PWD = NULL){
   library(odbc)
@@ -248,6 +261,7 @@ extractTumor = function(con,name,distinct=TRUE){
     inner join final_cancer f
     on c.condition_concept_id = f.concept_id
     where DATEADD(day, 90, c.condition_era_start_date) < b.index_date
+    and DATEADD(day, 365*2, c.condition_era_start_date) > b.index_date
     and c.condition_concept_id != 0
   ")
   tumor = dbGetQuery(con,sql)
@@ -420,8 +434,8 @@ extractVentilation = function(con,name,earliest=TRUE){
                name," b
     left join [dbo].[procedure_occurrence] p
     on b.person_id = p.person_id
-    where DATEADD(day, 7, p.procedure_date) >= b.index_date and 
-    DATEADD(day, -90, p.procedure_date) <= b.index_date and 
+    where DATEADD(day, 3, p.procedure_date) >= b.index_date and 
+    DATEADD(day, -28, p.procedure_date) <= b.index_date and 
     procedure_concept_id in (765576,2007912,2008006,2008007,2008008,2008009,2106469,2106470,
     2106642,2314003,2314035,2314036,2514578,2745440,2745444,2745447,2787823,2787824,2788016,
     2788017,2788019,2788020,2788021,2788022,2788024,2788025,2788026,2788027,4013354,4026054,
@@ -449,8 +463,8 @@ extractTracheostomy = function(con,name,earliest=TRUE){
                name," b
     left join [dbo].[procedure_occurrence] p
     on b.person_id = p.person_id
-    where DATEADD(day, 7, p.procedure_date) >= b.index_date and 
-    DATEADD(day, -90, p.procedure_date) <= b.index_date and 
+    where DATEADD(day, 3, p.procedure_date) >= b.index_date and 
+    DATEADD(day, -28, p.procedure_date) <= b.index_date and 
     procedure_concept_id in (2106470,2106564,2106570,2106571,2108641,2108642,2741578,
     2741580,2741589,2741675,2743216,2745483,2745491,2745499,2745507,2745515,2794811,2829384,
     2829386,2831237,2836115,2862930,2870619,4195473,4208093,4311023,4331311,4337047)
@@ -469,8 +483,8 @@ extractDeath = function(con,name,earliest=TRUE){
                name," b
     left join [dbo].[DEATH] d
     on b.person_id = d.person_id
-    where DATEADD(day, 7, d.death_date) >= b.index_date and
-    DATEADD(day, -90, d.death_date) <= b.index_date
+    where DATEADD(day, 3, d.death_date) >= b.index_date and
+    DATEADD(day, -28, d.death_date) <= b.index_date
   ")
   death = dbGetQuery(con,sql)
   return(death)
@@ -486,14 +500,9 @@ extractInpatient = function(con,name,earliest=TRUE){
                name," b
     left join [dbo].[visit_occurrence] v
     on b.person_id = v.person_id
-    where v.visit_concept_id in (
-      SELECT concept_id from concept
-        where concept_name like '%inpatient%'
-        and standard_concept = 'S'
-        and vocabulary_id = 'Visit'
-    )
-    and DATEADD(day, 7, v.visit_start_date) >= b.index_date and
-    DATEADD(day, -90, v.visit_start_date) <= b.index_date
+    where v.visit_concept_id in (262,9201,9203,32037,32760)
+    and DATEADD(day, 3, v.visit_start_date) >= b.index_date and
+    DATEADD(day, -28, v.visit_start_date) <= b.index_date
   ")
   inpatient = dbGetQuery(con,sql)
   return(inpatient)
@@ -511,8 +520,21 @@ extractIcu = function(con,name,earliset=TRUE){
     on b.person_id = v.person_id
     where (v.visit_source_value like '%intensive%'
       or v.visit_source_value like '%icu%')
-    and DATEADD(day, 7, v.visit_start_date) >= b.index_date and 
-    DATEADD(day, -90, v.visit_start_date) <= b.index_date
+    and DATEADD(day, 3, v.visit_start_date) >= b.index_date and 
+    DATEADD(day, -28, v.visit_start_date) <= b.index_date
+        UNION ALL
+    SELECT DISTINCT v.person_id, 
+    0 as concept_id,
+    v.visit_start_date as event_date,
+    'Visit' as domain_id,
+    'Inpatient' as category
+               from ",
+               name," b
+    left join [dbo].[visit_detail] v
+    on b.person_id = v.person_id
+    where v.visit_detail_concept_id = 32037
+    and DATEADD(day, 3, v.visit_start_date) >= b.index_date and
+    DATEADD(day, -28, v.visit_start_date) <= b.index_date
   ") 
   icu = dbGetQuery(con,sql)
   return(icu)
@@ -546,9 +568,9 @@ extractSevenDayRollingAverageCaseDeath = function(value=breakthroughCovid,file="
 }
 # math.
 getMeanSd = function(x,name="indexedAge"){
-  mean_name = paste0(name,"_mean")
-  sd_name = paste0(name,"_sd")
-  return(tibble(!!mean_name:=mean(x,na.rm = T),!!sd_name:=sd(x,na.rm = T)))
+  # mean_name = paste0(name,"_mean")
+  # sd_name = paste0(name,"_sd")
+  return(tibble(!!name:=paste0(round(mean(x,na.rm = T),1)," (",round(sd(x,na.rm = T),2),")")))
 }
 oddsRatioTest = function(cTable){
     mosaicplot(t(cTable), col = c("firebrick", "goldenrod1"), cex.axis = 1, sub = "", ylab = "Relative frequency of Covid breakthrough", main = "")
@@ -715,6 +737,35 @@ multivarTest = function(forTest,var_vector){
   rownames(res) = levelNames
   
   return(res)
+}
+
+univariateTestForAllconcept = function(forMatchData,concept,demoForTest){
+  matchItDataConcept = forMatchData %>% left_join(concept,by = "person_id") %>% left_join(demoForTest) %>%
+    dplyr::select(person_id,group,concept_id,time,status,count_of_visits,observation_days,ldd_category,age_at_event) %>%
+    distinct_all() %>%
+    as.data.table() 
+  matchItDataConceptSum = matchItDataConcept[,.(conceptNBtCount = .N - sum(group), conceptBtCount = sum(group)),by = concept_id]
+  matchItDataConceptFiltered = matchItDataConceptSum[(conceptNBtCount + conceptBtCount) > 100] %>% left_join(matchItDataConcept) %>%
+    dplyr::select(person_id, time, status, count_of_visits,observation_days,ldd_category, age_at_event, concept_id)
+  matchItDataConceptWide = dcast(matchItDataConceptFiltered, person_id + time + status + count_of_visits + observation_days + ldd_category + age_at_event ~ concept_id,fun = length)
+  covariates = colnames(matchItDataConceptWide)[9:dim(matchItDataConceptWide)[2]]
+  print(length(covariates)) # 1895
+  conceptRes = t(sapply(covariates,function(x) univarConceptScreen(matchItDataConceptWide,x)))
+  colnames(conceptRes) = c("irrCI", "irrP")
+  conceptRes = conceptRes %>% as.data.frame() %>% rownames_to_column(var = "concept_id")
+  conceptRes$irrP = as.numeric(conceptRes$irrP)
+  return(conceptRes) 
+}
+
+resultsDisplay = function(conceptRes,con){
+  matchItDataOrTopResults = conceptRes %>% mutate(concept_id = as.integer(concept_id)) %>%
+    mutate(irrFdr = p.adjust(as.numeric(irrP),method = "fdr"))
+  writeToSqlTempdb(con = con,"#matchItDataOrTopResults",matchItDataOrTopResults)
+  # table3 = matchItDataOrTopResults
+  conceptName = extractConceptName(con,"#matchItDataOrTopResults")
+  matchItDataOrTopResults = matchItDataOrTopResults %>% left_join(conceptName) %>%
+    arrange(irrP)
+  return(matchItDataOrTopResults)
 }
 
 
