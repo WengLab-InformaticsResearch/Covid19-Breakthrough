@@ -126,7 +126,7 @@ p1 = irMatrix %>% filter(vaccine_brand %in% c('pfizer','moderna')) %>%
   ggplot(aes(x=time_interval,y=personN)) + 
   geom_line(aes(color = vaccine_brand)) +
   xlab("Time to fully vaccinated (days) ") +
-  ylab("Cumulative incidence") +
+  ylab("Cumulative incidence count") +
   theme(legend.position = "none") + 
   labs(title="(A)")
 p1
@@ -181,7 +181,7 @@ p3 = irMatrix %>% ggplot(aes(x=time_interval,y=i)) +
   ylab("Cumulative incidence count") + 
   theme(legend.position = "none") + 
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) +
-  labs(title="(A)")
+  labs(title="(C)")
 p3
 
 irMatrix$this_month_person_days = irMatrix$person_days - c(irMatrix$person_days[4:length(irMatrix$person_days)],0,0,0)
@@ -194,9 +194,14 @@ p4 = irMatrix %>% ggplot(aes(x=time_interval,y=this_month_ir)) +
   xlab("Calendar month") + 
   theme(legend.position = "right") + 
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) + 
-  labs(title = "(B)")
+  labs(title = "(D)")
 p4
 
-grid.arrange(p3,p4,nrow = 1)
+p1 = p1 + theme(legend.title=element_blank())
+p2 = p2 + theme(legend.title=element_blank())
+p3 = p3 + theme(legend.title=element_blank())
+p4 = p4 + theme(legend.title=element_blank())
+
+grid.arrange(p1,p2,p3,p4,nrow = 2)
 table8 = irMatrix %>% dplyr::select(time_interval,vaccine_brand,this_month_person_days,this_month_i,this_month_ir)
 

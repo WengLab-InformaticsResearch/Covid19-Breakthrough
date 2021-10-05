@@ -539,25 +539,41 @@ extractIcu = function(con,name,earliset=TRUE){
   icu = dbGetQuery(con,sql)
   return(icu)
 }
-extractLastVisit = function(con,name){
-  sql = paste0("
+extractLastVisit = function(con,name, ob = T){
+  if(ob == F){
+    sql = paste0("
     SELECT v.person_id, 
     0 as concept_id,
     max(v.visit_end_date) as censored_date,
     'Visit' as domain_id,
     'last_records' as category
                from ",
-               name," b
+                 name," b
     left join [dbo].[visit_occurrence] v
     on b.person_id = v.person_id
     group by v.person_id
   ")
+    last = dbGetQuery(con,sql)
+  }else{
+    sql = paste0("
+    SELECT v.person_id, 
+    0 as concept_id,
+    max(v.observation_period_end_date) as censored_date,
+    'observation_period' as domain_id,
+    'last_records' as category
+               from ",
+               name," b
+    left join [dbo].[observation_period] v
+    on b.person_id = v.person_id
+    group by v.person_id
+  ")
   last = dbGetQuery(con,sql)
+  }
   return(last)
 }
 
 # URL resourcees
-extractSevenDayRollingAverageCaseDeath = function(value=breakthroughCovid,file="nyt-us-counties-08302021.csv"){
+extractSevenDayRollingAverageCaseDeath = function(value=breakthroughCovid,file="us-counties.csv"){
   nytDt = read.csv(file)
   nytFilterDt = nytDt %>% filter(county == 'New York City') %>%
     mutate(index_date =  as.Date(date))

@@ -30,7 +30,7 @@ extractFeatures = function(name="#breakthroughCovid",value=breakthroughCovid,con
   if(extractOutcomes){
     outcome = extractOutcomes(con,name)
   }
-  last = extractLastVisit(con,name)
+  last = extractLastVisit(con,name,ob = T)
   rollingAvg = extractSevenDayRollingAverageCaseDeath(value)
   return(list(obDays=obDays,visit=visit,demo=demo,brand=brand,condition=condition,
               drug=drug,immuno=immuno,outcome=outcome,rollingAvg=rollingAvg,last=last))

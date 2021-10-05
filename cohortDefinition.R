@@ -8,9 +8,9 @@ library(data.table)
 library(dplyr)
 
 
-server = 'elilex.dbmi.columbia.edu' # please input your server here
-database = 'ohdsi_cumc_2021q3r1' # please input ohdsi database here
-uid = 'cl3720_local' # please input the user name for ohdsi db here.
+server = 'xxx.xxx.xxx.xxx' # please input your server here
+database = 'ohdsi_cumc_2021q1r3' # please input ohdsi database here
+uid = 'xxx' # please input the user name for ohdsi db here.
 con = ohdsiConnection(server = server,database = database, uid = uid)
 testTable = dbGetQuery(con, 
     "SELECT TOP 100 * FROM [dbo].[measurement]"
@@ -42,10 +42,12 @@ select d.person_id
 	, max(d.drug_exposure_start_date) as latest_dose_date
 	, min(d.drug_exposure_start_date) as earliest_dose_date
 	from [dbo].drug_exposure d 
-	where d.drug_concept_id in (739902,739903,739905,739906,1202358,702866)
+	where d.drug_concept_id in (702866)
 	group by d.person_id
 "
 vaccinatedCohort = dbGetQuery(con,sql)
+vaccinatedCohort %>% pull(person_id) %>% unique() %>% length() # 336236
+
 # dim(vaccinatedCohort) # 262205
 # vaccinatedCohort %>% group_by(vaccine_brand) %>% summarise(N=length(unique(person_id)))
 
@@ -72,7 +74,7 @@ cleanedVaccinatedCohort = cleanedVaccinatedCohort %>% filter(!person_id %in% dup
 # dim(cleanedVaccinatedCohort) # 182560
 # cleanedVaccinatedCohort %>% arrange(latest_dose_date) %>% head(1) # 2021-01-04
 # cleanedVaccinatedCohort %>% arrange(earliest_dose_date) %>% head(1) # 2020-12-14
-cleanedVaccinatedCohort %>% pull(person_id) %>% unique() %>% length()
+cleanedVaccinatedCohort %>% pull(person_id) %>% unique() %>% length() # 227617
 # cleanedVaccinatedCohort %>% arrange(latest_dose_date)
 
 # Define covid positive (based on prc) cohort
@@ -88,7 +90,7 @@ and value_as_concept_id in (9191,4127785,3661907,4126681,4127786,9192,4123508,41
 "
 covidPositivePcrCohort = dbGetQuery(con,sql)
 # dim(covidPositivePcrCohort) # 20905 (37529 if ab test positive included)
-covidPositivePcrCohort %>% pull(person_id) %>% unique() %>% length()
+covidPositivePcrCohort %>% pull(person_id) %>% unique() %>% length() # 17923
 
 
 # Define covid negative (based on prc) cohort
@@ -104,7 +106,7 @@ and value_as_concept_id not in (9191,4127785,3661907,4126681,4127786,9192,412350
 "
 covidNegativePcrCohort = dbGetQuery(con,sql)
 # dim(covidNegativePcrCohort)[1] # 370157 (37529 if ab test positive included)
-covidNegativePcrCohort %>% pull(person_id) %>% unique() %>% length()
+covidNegativePcrCohort %>% pull(person_id) %>% unique() %>% length() # 211246
 # Define covid positive (based on all meas and cond) cohort
 sql = "
 select m.person_id
@@ -123,7 +125,7 @@ from [dbo].condition_occurrence c
 where c.condition_concept_id in (756031,756039,3655975,3655976,3655977,3656667,3656668,3656669,3661405,3661406,3661408,3661631,3661632,3661748,3661885,3662381,3663281,37310254,37310283,37310284,37310286,37310287,37311061)
 "
 covidPositiveGeneralCohort = dbGetQuery(con,sql)
-covidPositiveGeneralCohort %>% pull(person_id) %>% unique() %>% length() # 54744
+covidPositiveGeneralCohort %>% pull(person_id) %>% unique() %>% length() # 61694
 
 
 # define covid-vaccine breakthrough cohort
@@ -138,9 +140,10 @@ breakthroughCovid = cleanedVaccinatedCohort %>%
     slice(1) %>%
     ungroup %>%
     mutate(index_date = evidence_date)
+breakthroughCovid %>% pull(person_id) %>% unique() %>% length() # 357
 
-# Remove previous evidences
-breakthroughInVaccinationCovid = cleanedVaccinatedCohort %>% 
+# Remove before vax evidences
+beforeVaxEvidence = cleanedVaccinatedCohort %>% 
   left_join(covidPositiveGeneralCohort,by = "person_id") %>%
   mutate(days_to_last_dose = as.integer(
     difftime(evidence_date, latest_dose_date, units = "days"))) %>%
@@ -151,31 +154,9 @@ breakthroughInVaccinationCovid = cleanedVaccinatedCohort %>%
   ungroup %>%
   mutate(index_date = evidence_date) %>% dplyr::select(person_id)
 
-breakthroughCovid = breakthroughCovid %>% filter(!person_id %in% breakthroughInVaccinationCovid$person_id)
+breakthroughCovid = breakthroughCovid %>% filter(!person_id %in% beforeVaxEvidence$person_id)
 breakthroughCovid %>% pull(person_id) %>% unique() %>% length() # 263.
 
-
-  
-# dim(breakthroughCovid) # 129 (924 if ab test included, 2203 if all covid used)
-
-# define covid-vaccine non breakthrough cohort
-# suspBreakthroughCohort = cleanedVaccinatedCohort %>% 
-#     left_join(covidPositiveGeneralCohort,by = "person_id") %>%
-#     mutate(days_to_first_dose = as.integer(
-#         difftime(evidence_date, earliest_dose_date, units = "days"))) %>%
-#     filter(days_to_first_dose > 0) %>%  
-#     group_by(person_id) %>%
-#     arrange(days_to_first_dose) %>%
-#     slice(1) %>%
-#     ungroup %>% 
-#     dplyr::select(person_id,evidence_date)
-# dim(suspBreakthroughCohort) # 3312
-# 
-# nonBreakthroughCovid = cleanedVaccinatedCohort %>% 
-#     left_join(suspBreakthroughCohort,by = "person_id") %>%
-#     filter(is.na(evidence_date)) %>% 
-#     mutate(index_date = latest_dose_date)
-# dim(nonBreakthroughCovid) # 179248
 
 # define covid-vaccine non breakthrough cohort with more confidences.
 nonBreakthroughPcrCovid = cleanedVaccinatedCohort %>% 
@@ -186,11 +167,16 @@ nonBreakthroughPcrCovid = cleanedVaccinatedCohort %>%
     group_by(person_id) %>%
     arrange(-days_to_last_dose) %>% # latest pcr date.
     slice(1) %>%
-    ungroup %>% 
-    left_join(covidPositiveGeneralCohort,by = "person_id") %>%
-    filter(is.na(evidence_date.y)) %>% 
-    mutate(index_date = evidence_date.x)
+    ungroup %>% mutate(index_date = evidence_date) %>% dplyr::select(-evidence_concept_id,-evidence_date) 
+
+nonBreakthroughPcrCovid %>% pull(person_id) %>% unique() %>% length() # 24760
+
 # dim(nonBreakthroughPcrCovid) # 10201
+beforeExitEvidence = nonBreakthroughPcrCovid %>%
+  left_join(covidPositiveGeneralCohort,by = "person_id") %>%
+  filter(!is.na(evidence_date))
+# before left evidence.
+nonBreakthroughPcrCovid = nonBreakthroughPcrCovid %>% filter(!person_id %in% beforeExitEvidence$person_id)
 nonBreakthroughPcrCovid %>% pull(person_id) %>% unique() %>% length() # 18683
 
 # define pre-vaccine PCR negative cohort
@@ -202,12 +188,16 @@ preVaccinePcrNegativeCovid = covidNegativePcrCohort %>%
     group_by(person_id) %>%
     arrange(days_to_first_eua) %>% # pcr date close to EUA date
     slice(1) %>%
-    ungroup %>% 
-    left_join(covidPositiveGeneralCohort,by = "person_id") %>%
-    filter(is.na(evidence_date.y)) %>%
-    mutate(index_date = evidence_date.x)
+    ungroup %>% mutate(index_date = evidence_date) %>% dplyr::select(-evidence_date)
+preVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 117848
 
-preVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 18683
+# before eua evidence
+beforeEuaEvidence = preVaccinePcrNegativeCovid %>%
+    left_join(covidPositiveGeneralCohort,by = "person_id") %>%
+    filter(evidence_date < "2020-12-11" & !is.na(evidence_date))
+
+preVaccinePcrNegativeCovid = preVaccinePcrNegativeCovid %>% filter(!person_id %in% beforeEuaEvidence$person_id)
+preVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 95793
 
 # dim(preVaccinePcrNegativeCovid) # 89725
 
@@ -222,8 +212,7 @@ preVaccinePcrPositiveCovid = covidPositivePcrCohort %>%
   slice(1) %>%
   ungroup %>% 
   mutate(index_date = evidence_date)
-# dim(preVaccinePcrPositiveCovid) # 8356
-preVaccinePcrPositiveCovid %>% pull(person_id) %>% unique() %>% length() # 18683
+preVaccinePcrPositiveCovid %>% pull(person_id) %>% unique() %>% length() # 8770
 
 # first administrating date.
 cleanedVaccinatedCohort %>% dplyr::pull(latest_dose_date) %>% unique() %>% min() # 2021-01-04
@@ -232,11 +221,9 @@ cleanedVaccinatedCohort %>% dplyr::pull(latest_dose_date) %>% unique() %>% min()
 postVaccinePcrNegativeCovid = covidNegativePcrCohort %>% 
   dplyr::select(person_id,evidence_date) %>%
   mutate(entry_date = as.Date("2021-01-04") + 14) %>%
-  left_join(covidPositiveGeneralCohort,by = "person_id") %>%
-  filter(is.na(evidence_date.y)) %>%
-  mutate(index_date = evidence_date.x) %>% 
+  mutate(index_date = evidence_date) %>% 
   dplyr::select(person_id,index_date,entry_date) %>%
-  left_join(cleanedVaccinatedCohort) %>%
+  left_join(vaccinatedCohort) %>%
   mutate(censor_date = earliest_dose_date) %>%
   dplyr::select(person_id,index_date,entry_date,censor_date) %>%
   filter(((!is.na(censor_date) & (index_date < censor_date)) | is.na(censor_date) ) & (index_date > entry_date) ) %>%
@@ -244,8 +231,15 @@ postVaccinePcrNegativeCovid = covidNegativePcrCohort %>%
   arrange(desc(index_date)) %>% # latest pcr
   slice(1) %>%
   ungroup
+postVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 74726
 
-postVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 71345
+# before vax evidence.
+beforeVaxEvidence = postVaccinePcrNegativeCovid %>% 
+  left_join(covidPositiveGeneralCohort,by = "person_id") %>%
+  filter(!is.na(evidence_date) & (is.na(censor_date) | (!is.na(censor_date) & (evidence_date < censor_date))))
+
+postVaccinePcrNegativeCovid = postVaccinePcrNegativeCovid %>% filter(!person_id %in% beforeVaxEvidence$person_id)
+postVaccinePcrNegativeCovid %>% pull(person_id) %>% unique() %>% length() # 63208
 
 # dim(postVaccinePcrNegativeCovid) # 51,005
 
@@ -255,16 +249,23 @@ postVaccinePcrPositiveCovid = covidPositivePcrCohort %>%
   mutate(entry_date = as.Date("2021-01-04") + 14) %>%
   mutate(index_date = evidence_date) %>% 
   dplyr::select(person_id,index_date,entry_date) %>%
-  left_join(cleanedVaccinatedCohort) %>%
+  left_join(vaccinatedCohort) %>%
   mutate(censor_date = earliest_dose_date) %>%
   dplyr::select(person_id,index_date,entry_date,censor_date) %>%
   filter((!is.na(censor_date) & (index_date < censor_date) | is.na(censor_date) ) & (index_date > entry_date) ) %>%
   group_by(person_id) %>%
   arrange(index_date) %>% # ealiest pcr
   slice(1) %>%
-  ungroup
-# dim(postVaccinePcrPositiveCovid) # 5078
-postVaccinePcrPositiveCovid %>% pull(person_id) %>% unique() %>% length() # 6516
+  ungroup 
+postVaccinePcrPositiveCovid %>% pull(person_id) %>% unique() %>% length() # 6035
+
+# before eua evidence.
+beforeEuaEvidence = postVaccinePcrPositiveCovid %>% 
+  left_join(covidPositiveGeneralCohort,by = "person_id") %>%
+  filter(!is.na(evidence_date) & ((evidence_date < entry_date)))
+
+postVaccinePcrPositiveCovid = postVaccinePcrPositiveCovid %>% filter(!person_id %in% beforeEuaEvidence$person_id)
+postVaccinePcrPositiveCovid %>% pull(person_id) %>% unique() %>% length() # 5457
 
 
 
