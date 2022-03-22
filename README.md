@@ -1,6 +1,6 @@
 # Covid19-Breakthrough
 
-- (main.R) [https://github.com/WengLab-InformaticsResearch/Covid19-Breakthrough/blob/main/main.R] main entrance of the analysis;
+- [main.R](https://github.com/WengLab-InformaticsResearch/Covid19-Breakthrough/blob/main/main.R) main entrance of the analysis;
 - [cohortCharacterizationAndRefine.R] (https://github.com/WengLab-InformaticsResearch/Covid19-Breakthrough/blob/main/cohortCharacterizationAndRefine.R) perform three steps
   - [cohortDefinition.R] (https://github.com/WengLab-InformaticsResearch/Covid19-Breakthrough/blob/main/cohortDefinition.R) defines vax, pre-vax, and un-vax cohorts
   - [featureExtraction.R] (https://github.com/WengLab-InformaticsResearch/Covid19-Breakthrough/blob/main/featureExtraction.R) extracts relevant features for analysis
